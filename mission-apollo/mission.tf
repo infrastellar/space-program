@@ -4,10 +4,11 @@
 # easy to share with mission stage procedures.
 variable "mission" {
   type = object({
-    name   = string
-    tier   = string
-    mode   = string
-    region = string
+    name       = string
+    tier       = string
+    mode       = string
+    region     = string
+    space_name = string
     space_remote = object({
       bucket         = string
       dynamodb_table = string
@@ -19,10 +20,11 @@ variable "mission" {
 
   # Defaults are set but most fail validation
   default = {
-    name   = ""
-    tier   = "development"
-    mode   = "managed"
-    region = ""
+    name       = "apollo"
+    tier       = "development"
+    mode       = "managed"
+    region     = ""
+    space_name = ""
     space_remote = {
       bucket         = ""
       dynamodb_table = ""
@@ -78,12 +80,8 @@ variable "cloud_provider" {
 
 # Specific mission tags can be added here
 variable "mission_tags" {
-  type = object({
-    managed_by = string
-  })
-  default = {
-    managed_by = "terraform"
-  }
+  type    = object
+  default = {}
 }
 
 # Locals allows there to be a manicured interface into the mission, the stages,
@@ -99,7 +97,11 @@ locals {
     mission_tier   = var.mission.tier,
     mission_mode   = var.mission.mode,
     mission_region = var.mission.region,
+    managed_by     = "terraform"
   })
+
+  # Use this to prefix all resource names
+  mission_prefix = format("%s-%s", var.mission.space_name, var.mission.name)
 }
 
 ## MISSION PROVIDERS

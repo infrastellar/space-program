@@ -5,7 +5,7 @@ locals {
 module "state" {
   source = "../modules/state"
 
-  name       = "jan"
+  name       = "mar"
   region     = local.region
   account_id = ""
 }
