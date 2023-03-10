@@ -1,7 +1,14 @@
 # Infrastellar Space Program
 
-This repository represents the development of Infrastellar Systems "Space Program", a
-method for managing reliable production infrastructure.
+This repository represents the development of Infrastellar Systems "Space
+Program", a method for managing reliable production infrastructure.
+
+## Space Program
+
+Space Program is the name for the opinionated Terraform setup that Infrastellar
+Systems uses to manage infrastructure. It aims to provide platform operators
+and developers with a high level system design that builds in advantages to
+reliability, ease of collaboration, and change management.
 
 ## Glossary
 
