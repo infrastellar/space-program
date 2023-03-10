@@ -8,7 +8,35 @@ Program", a method for managing reliable production infrastructure.
 Space Program is the name for the opinionated Terraform setup that Infrastellar
 Systems uses to manage infrastructure. It aims to provide platform operators
 and developers with a high level system design that builds in advantages to
-reliability, ease of collaboration, and change management.
+reliability, ease of collaboration, and change management. The system has
+existed in a similar shape and has been developed over seven years and
+constitutes all the lessons learned from running a global production
+infrastructure for a large enterprise company.
+
+## Narrative
+
+Each feature of the Space Program method for setting up terraform is designed
+to be easy to communicate. A space is simply that, a space to put
+infrastructure. There isn't much more to it. Your mission is then to fill that
+space with infrastructure. Missions are designed to achieve some
+outcome. Perhaps you want to stand up an entirely new management network with
+resources. You can develop a mission around that single idea.
+
+Once you have a mission, you want to reliably execute that mission in the space
+you have designated. To do this you will need to do a bit of systems design to
+understand how the resources you want to create fit together. Once you have
+that understanding you want to break resources down into procedures that are
+executed in stages. For example putting procedures in stage000 means that your
+procedures have zero dependencies other than the cloud provider. Stage010
+procedures have dependencies on those in stage000, stage020 on those in
+stage000 and stage010, and so on.
+
+Procedures should be self contained terraform components in that they pull in
+inputs (whether through variables, other resources, or other procedures), do
+something with that data and then produce outputs. While they are self
+contained in their configuration they should recognize that they are being
+executed within a mission, which provides them with a base configuration in
+order to do their work.
 
 ## Glossary
 
@@ -20,13 +48,13 @@ for running infrastructure "missions".
 Each space is confined to and operates in a single provider region.
 
 A space recognizes a mission to establish infrastructure resources. A space can
-have multiple missions though there the missions themselves must do their own
-work to avoid conflicting resources.
+have multiple missions. Missions are responsible for maintaining their own name
+space to avoid conflicting resources.
 
 ### Mission
 
-A mission is a "staged" configuration that contains many procedures
-for establishing infrastructure using HashiCorp Terraform.
+A mission is a configuration that contains staged procedures for establishing
+infrastructure using HashiCorp Terraform.
 
 Missions present a single variable interface for managing the staged
 configuration.
