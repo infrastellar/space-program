@@ -33,8 +33,9 @@ variable "backend" {
 }
 
 locals {
+  # STATE LOCATION: <space-remote-bucket>/missions/<mission-name>/<mission-region>/<stage>/<procedure>/terraform.tfstate
   key = format(
-    "%s/%s/mission/%s/%s/terraform.tfstate",
+    "missions/%s/%s/%s/%s/terraform.tfstate",
     var.mission.name,
     var.mission.region,
     var.stage,
