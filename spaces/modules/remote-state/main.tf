@@ -1,60 +1,35 @@
 data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+data "aws_iam_roles" "overseer" {
+  name_regex  = var.overseer.name_regex
+  path_prefix = var.overseer.path_prefix
+}
 
 resource "random_string" "uniq" {
-  length  = 16
+  length  = 6
   special = false
   upper   = false
 }
 
-resource "aws_iam_group" "state" {
-  name = local.group_name
-}
-
-data "aws_iam_policy_document" "state_group" {
-  statement {
-    sid    = "AllowStateGroupRoleAccess"
-    effect = "Allow"
-    actions = [
-      "sts:AssumeRole"
-    ]
-    resources = [
-      aws_iam_role.state.arn
-    ]
-  }
-}
-
-resource "aws_iam_policy" "state_group" {
-  name        = format("%s-group-assume-state-role", var.name)
-  description = format("Allow users in %s group to assume state role for %s environment", aws_iam_group.state.name, var.name)
-  policy      = data.aws_iam_policy_document.state_group.json
-}
-
-resource "aws_iam_group_policy_attachment" "state_group" {
-  group      = aws_iam_group.state.name
-  policy_arn = aws_iam_policy.state_group.arn
-}
-
-
 #### STATE ROLE
-# Not sure yet if this is needed
 resource "aws_iam_role" "state" {
   name = local.role_name
+  path = "/platform/space/"
 
   assume_role_policy = data.aws_iam_policy_document.state_role.json
 }
 
 data "aws_iam_policy_document" "state_role" {
   statement {
-    sid    = "AllowAssumeRole"
+    sid    = "InfraStateAllowAssumeRole"
     effect = "Allow"
     actions = [
       "sts:AssumeRole"
     ]
     principals {
-      type = "AWS"
-      identifiers = [
-        format("arn:aws:iam::%s:root", var.account_id)
-      ]
+      type        = "AWS"
+      identifiers = data.aws_iam_roles.overseer.arns
     }
   }
 }
@@ -72,9 +47,9 @@ resource "aws_dynamodb_table" "state" {
     type = "S"
   }
 
-  tags = {
+  tags = merge(local.tags, {
     "Name" = local.dynamodb_table_name
-  }
+  })
 }
 
 resource "aws_kms_key" "state" {
@@ -82,9 +57,9 @@ resource "aws_kms_key" "state" {
   deletion_window_in_days = 20
   enable_key_rotation     = true
 
-  tags = {
+  tags = merge(local.tags, {
     "Name" = local.kms_key_name
-  }
+  })
 
   # This policy gives permissions for administration on this key to the root
   # account and the controller user
@@ -97,8 +72,7 @@ resource "aws_kms_key" "state" {
         "Effect": "Allow",
         "Principal": {
           "AWS": [
-            "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root",
-            "${aws_iam_role.state.arn}"
+            "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
           ]
         },
         "Action": "kms:*",
@@ -134,11 +108,13 @@ resource "aws_kms_alias" "state" {
 
 resource "aws_s3_bucket" "state" {
   bucket = format("%s-%s", local.s3_bucket_name, random_string.uniq.result)
+  tags = merge(local.tags, {
+    "debtbook:env:backup" = "root"
+  })
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "state_encryption" {
   bucket = aws_s3_bucket.state.id
-
   rule {
     apply_server_side_encryption_by_default {
       kms_master_key_id = aws_kms_key.state.arn
@@ -147,9 +123,11 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "state_encryption"
   }
 }
 
-resource "aws_s3_bucket_acl" "state" {
+resource "aws_s3_bucket_logging" "bucket" {
   bucket = aws_s3_bucket.state.id
-  acl    = "private"
+
+  target_bucket = var.log_bucket_id
+  target_prefix = local.s3_bucket_name
 }
 
 resource "aws_s3_bucket_versioning" "state_versioning" {
@@ -160,50 +138,6 @@ resource "aws_s3_bucket_versioning" "state_versioning" {
 }
 
 #### POLICIES
-
-resource "aws_iam_policy" "locks" {
-  name   = local.dynamodb_table_name
-  policy = <<EOF
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-          "Sid": "ListAndDescribe",
-          "Effect": "Allow",
-          "Action": [
-            "dynamodb:List*",
-            "dynamodb:DescribeReservedCapacity*",
-            "dynamodb:DescribeLimits",
-            "dynamodb:CreateTable",
-            "dynamodb:DescribeTimeToLive",
-            "dynamodb:TagResource",
-            "dynamodb:DescribeTable",
-            "dynamodb:DescribeContinuousBackups",
-            "dynamodb:UntagResource"
-          ],
-          "Resource": "*"
-        },
-        {
-          "Sid": "SpecificTable",
-          "Effect": "Allow",
-          "Action": [
-              "dynamodb:BatchGet*",
-              "dynamodb:DescribeStream",
-              "dynamodb:DescribeTable",
-              "dynamodb:Get*",
-              "dynamodb:Query",
-              "dynamodb:Scan",
-              "dynamodb:BatchWrite*",
-              "dynamodb:Delete*",
-              "dynamodb:Update*",
-              "dynamodb:PutItem"
-          ],
-          "Resource": "${aws_dynamodb_table.state.arn}"
-        }
-    ]
-}
-EOF
-}
 
 resource "aws_s3_bucket_policy" "state" {
   bucket = aws_s3_bucket.state.id
@@ -248,65 +182,109 @@ resource "aws_s3_bucket_policy" "state" {
                     "s3:x-amz-server-side-encryption-aws-kms-key-id": "${aws_kms_key.state.arn}"
                 }
             }
+        },
+        {
+            "Sid": "DenyHTTPRequests",
+            "Effect": "Deny",
+            "Principal": "*",
+            "Action": "*",
+            "Resource": "${aws_s3_bucket.state.arn}/*",
+            "Condition": {
+                "Bool": {
+                    "aws:SecureTransport": "false"
+                }
+            }
         }
     ]
   }
 EOF
+}
 
+resource "aws_iam_role_policy_attachment" "state" {
+  role       = aws_iam_role.state.name
+  policy_arn = aws_iam_policy.state.arn
 }
 
 resource "aws_iam_policy" "state" {
-  name   = local.s3_bucket_name
-  policy = <<EOF
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-           "Effect": "Allow",
-           "Action": [
-              "s3:ListBucket"
-           ],
-           "Resource": [
-             "${aws_s3_bucket.state.arn}"
-           ]
-        },
-        {
-           "Effect": "Allow",
-           "Action": [
-              "s3:PutObject",
-              "s3:PutObjectAcl",
-              "s3:PutObjectVersion",
-              "s3:PutObjectTagging",
-              "s3:GetObject",
-              "s3:GetObjectAcl",
-              "s3:GetObjectVersion",
-              "s3:GetObjectTagging",
-              "s3:DeleteObject",
-              "s3:ListObject"
-           ],
-           "Resource": [
-              "${aws_s3_bucket.state.arn}",
-              "${aws_s3_bucket.state.arn}/*"
-            ]
-        },
-        {
-           "Effect": "Allow",
-           "Action": ["kms:Decrypt", "kms:Encrypt"],
-           "Resource": "${aws_kms_key.state.arn}"
-        }
-     ]
-}
-EOF
+  name   = local.policy_name
+  policy = data.aws_iam_policy_document.state.json
 }
 
-#### POLICY ATTACHMENTS
+data "aws_iam_policy_document" "state" {
+  statement {
+    sid    = format("%sAllowListBucket", local.env_title)
+    effect = "Allow"
+    actions = [
+      "s3:ListBucket"
+    ]
+    resources = [
+      aws_s3_bucket.state.arn
+    ]
+  }
 
-resource "aws_iam_role_policy_attachment" "locks_policy" {
-  policy_arn = aws_iam_policy.locks.arn
-  role       = aws_iam_role.state.name
-}
+  statement {
+    sid    = format("%sAllowEditingBucketObjects", local.env_title)
+    effect = "Allow"
+    actions = [
+      "s3:PutObject",
+      "s3:PutObjectAcl",
+      "s3:PutObjectVersion",
+      "s3:PutObjectTagging",
+      "s3:GetObject",
+      "s3:GetObjectAcl",
+      "s3:GetObjectVersion",
+      "s3:GetObjectTagging",
+      "s3:DeleteObject",
+      "s3:ListObject"
+    ]
+    resources = [
+      "${aws_s3_bucket.state.arn}",
+      "${aws_s3_bucket.state.arn}/*"
+    ]
+  }
 
-resource "aws_iam_role_policy_attachment" "state_policy" {
-  policy_arn = aws_iam_policy.state.arn
-  role       = aws_iam_role.state.name
+  statement {
+    sid    = format("%sAllowEncryptDecryptStateKey", local.env_title)
+    effect = "Allow"
+    actions = [
+      "kms:Decrypt",
+      "kms:Encrypt"
+    ]
+    resources = [aws_kms_key.state.arn]
+  }
+
+  statement {
+    sid    = format("%sAllowListDescribeLocksTable", local.env_title)
+    effect = "Allow"
+    actions = [
+      "dynamodb:List*",
+      "dynamodb:DescribeReservedCapacity*",
+      "dynamodb:DescribeLimits",
+      "dynamodb:CreateTable",
+      "dynamodb:DescribeTimeToLive",
+      "dynamodb:TagResource",
+      "dynamodb:DescribeTable",
+      "dynamodb:DescribeContinuousBackups",
+      "dynamodb:UntagResource"
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = format("%sAllowLockMgmt", local.env_title)
+    effect = "Allow"
+    actions = [
+      "dynamodb:BatchGet*",
+      "dynamodb:DescribeStream",
+      "dynamodb:DescribeTable",
+      "dynamodb:Get*",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:BatchWrite*",
+      "dynamodb:Delete*",
+      "dynamodb:Update*",
+      "dynamodb:PutItem"
+    ]
+    resources = [aws_dynamodb_table.state.arn]
+  }
 }

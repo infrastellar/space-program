@@ -1,5 +1,0 @@
-bucket = ""
-dynamodb_table = ""
-kms_key_id = ""
-encrypt = true
-region = "us-east-2"

@@ -18,6 +18,23 @@ output "kms_alias" {
   value       = aws_kms_alias.state
 }
 
-output "role" {
-  value = aws_iam_role.state
+output "region" {
+  value = data.aws_region.current.name
+}
+
+output "role_arn" {
+  value = aws_iam_role.state.arn
+}
+
+output "tfbackend" {
+  value = templatefile(
+    "${path.module}/tfbackend.tmpl",
+    {
+      bucket         = aws_s3_bucket.state.id
+      dynamodb_table = aws_dynamodb_table.state.name
+      kms_key_id     = aws_kms_alias.state.arn
+      encrypt        = true
+      region         = var.region
+    }
+  )
 }
