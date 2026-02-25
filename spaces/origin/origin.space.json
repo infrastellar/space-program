@@ -1,0 +1,8 @@
+{
+  "bucket": "module.state.bucket.id",
+  "use_lockfile": true,
+  "encrypt": true,
+  "kms_key_id": "module.state.kms_alias.arn",
+  "region": "module.state.region",
+  "role_arn": "module.state.role_arn"
+}
